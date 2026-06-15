@@ -157,6 +157,33 @@ async def settle_predictions(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ 結算失敗：{exc}", ephemeral=True)
 
 
+@bot.tree.command(name="leaderboard", description="查詢預測積分排行榜（前 10 名）")
+async def leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    try:
+        rows = leaderboard_db.get_top_n(limit=10)
+        embed = discord.Embed(
+            title="🏆 預測積分排行榜",
+            color=discord.Color.blue(),
+        )
+
+        if not rows:
+            embed.description = "目前尚無積分紀錄，快來預測吧！"
+        else:
+            lines = []
+            medals = ["🥇", "🥈", "🥉"]
+            for idx, row in enumerate(rows, start=1):
+                prefix = medals[idx - 1] if idx <= 3 else f"{idx}."
+                lines.append(f"{prefix} **{row.username}** — {row.points} 分")
+            embed.description = "\n".join(lines)
+
+        await interaction.followup.send(embed=embed)
+    except Exception as exc:
+        logger.exception("leaderboard failed")
+        await interaction.followup.send(f"❌ 查詢失敗：{exc}", ephemeral=True)
+
+
 def main():
     server_thread = threading.Thread(target=run_fastapi, daemon=True)
     server_thread.start()
