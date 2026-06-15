@@ -1,4 +1,4 @@
-from database import games, predictions
+from database import games, leaderboard, predictions
 from database.base import (
     TABLE_LEADERBOARD,
     TABLE_MATCHES,
@@ -16,6 +16,7 @@ __all__ = [
     "format_taipei_time",
     "games",
     "get_connection",
+    "leaderboard",
     "parse_api_datetime",
     "predictions",
     "utc_now",

@@ -10,6 +10,8 @@ from fastapi import FastAPI
 import api_client
 from config import DISCORD_TOKEN, PORT, TEST_MODE, get_channel_id
 from database import games as games_db
+from database import leaderboard as leaderboard_db
+from database import predictions as predictions_db
 from views import MatchPredictionView, build_match_embed
 
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +22,27 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = FastAPI(title="World Cup Bot Health Check")
+
+
+def _calculate_points(prediction, actual_winner: str, home_score: int, away_score: int) -> int:
+    points = 0
+    if prediction.predict_winner == actual_winner:
+        points = 1
+    if prediction.predict_home_score == home_score and prediction.predict_away_score == away_score:
+        points = 3
+    return points
+
+
+def _build_settlement_embed(match, home_score: int, away_score: int, scorers: list[str]) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🏁 結算報告：{match.home_team} {home_score} - {away_score} {match.away_team}",
+        color=discord.Color.gold(),
+    )
+    if scorers:
+        embed.description = "\n".join(scorers)
+    else:
+        embed.description = "本場無人獲得積分。"
+    return embed
 
 
 @app.get("/")
@@ -81,6 +104,57 @@ async def sync_matches(interaction: discord.Interaction):
     except Exception as exc:
         logger.exception("sync_matches failed")
         await interaction.followup.send(f"❌ 同步失敗：{exc}", ephemeral=True)
+
+
+@bot.tree.command(name="settle_predictions", description="結算已結束賽事的預測並發放積分")
+@app_commands.default_permissions(administrator=True)
+async def settle_predictions(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        pending = games_db.get_matches_ready_for_settlement(hours_after_start=2.5)
+        if not pending:
+            await interaction.followup.send("ℹ️ 目前沒有需要結算的賽事。", ephemeral=True)
+            return
+
+        channel = bot.get_channel(get_channel_id())
+        if channel is None:
+            await interaction.followup.send("❌ 找不到目標頻道，請檢查 CHANNEL_ID 設定。", ephemeral=True)
+            return
+
+        settled_count = 0
+        for match in pending:
+            game = api_client.get_game_by_id(match.fixture_id)
+            if game is None or not api_client.is_game_finished(game):
+                continue
+            if game.home_score is None or game.away_score is None:
+                continue
+
+            actual_winner = api_client.determine_winner(
+                game.home_score, game.away_score, match.match_type
+            )
+            predictions = predictions_db.get_predictions_for_fixture(match.fixture_id)
+            scorers: list[str] = []
+
+            for pred in predictions:
+                points = _calculate_points(pred, actual_winner, game.home_score, game.away_score)
+                if points > 0:
+                    leaderboard_db.add_points(pred.user_id, pred.username, points)
+                    reason = "比分全對" if points == 3 else "勝負正確"
+                    scorers.append(f"• {pred.username} +{points} 分（{reason}）")
+
+            games_db.update_match_result(match.fixture_id, game.home_score, game.away_score)
+            embed = _build_settlement_embed(match, game.home_score, game.away_score, scorers)
+            await channel.send(embed=embed)
+            settled_count += 1
+
+        await interaction.followup.send(
+            f"✅ 結算完成，共處理 {settled_count} 場賽事。",
+            ephemeral=True,
+        )
+    except Exception as exc:
+        logger.exception("settle_predictions failed")
+        await interaction.followup.send(f"❌ 結算失敗：{exc}", ephemeral=True)
 
 
 def main():
