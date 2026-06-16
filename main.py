@@ -1,3 +1,4 @@
+# main.py
 import logging
 import threading
 
@@ -7,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from fastapi import FastAPI
 
-import api_client
+import services as api_client
 from config import DISCORD_TOKEN, PORT, TEST_MODE, get_channel_id
 from database import games as games_db
 from database import leaderboard as leaderboard_db
@@ -61,6 +62,20 @@ def run_fastapi():
 @bot.event
 async def on_ready():
     logger.info("Logged in as %s (TEST_MODE=%s)", bot.user, TEST_MODE)
+
+    try:
+        active_matches = games_db.get_active_matches()
+        for match in active_matches:
+            bot.add_view(MatchPredictionView(
+                fixture_id=match.fixture_id,
+                match_type=match.match_type,
+                home_team=match.home_team,
+                away_team=match.away_team
+            ))
+        logger.info("已成功重新載入 %d 場賽事的常駐按鈕監聽！", len(active_matches))
+    except Exception:
+        logger.exception("無法重新載入常駐按鈕監聽")
+
     try:
         synced = await bot.tree.sync()
         logger.info("Synced %d slash command(s)", len(synced))

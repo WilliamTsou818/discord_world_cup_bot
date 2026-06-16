@@ -1,13 +1,24 @@
+# services/worldcup_api.py
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-
+from datetime import datetime, timedelta
 import requests
+import ssl
+from requests.adapters import HTTPAdapter
 
 from config import WORLDCUP_API_TOKEN
-from database.base import parse_api_datetime, utc_now
+from utils import parse_api_datetime, utc_now, translate_team_name
 
 API_BASE_URL = "https://worldcup26.ir"
 GAMES_ENDPOINT = f"{API_BASE_URL}/get/games"
+
+
+class TLSAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
 
 
 @dataclass
@@ -25,14 +36,20 @@ class Game:
 
 
 def _headers() -> dict[str, str]:
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     if WORLDCUP_API_TOKEN:
         headers["Authorization"] = f"Bearer {WORLDCUP_API_TOKEN}"
     return headers
 
 
 def fetch_games() -> list[Game]:
-    response = requests.get(GAMES_ENDPOINT, headers=_headers(), timeout=30)
+    session = requests.Session()
+    session.mount("https://", TLSAdapter())
+    
+    response = session.get(GAMES_ENDPOINT, headers=_headers(), timeout=30)
     response.raise_for_status()
     payload = response.json()
     return [parse_game(raw) for raw in payload.get("games", [])]
@@ -42,16 +59,19 @@ def parse_game(raw: dict) -> Game:
     home = raw.get("home_team_name_en") or raw.get("home_team_label") or "TBD"
     away = raw.get("away_team_name_en") or raw.get("away_team_label") or "TBD"
 
+    home_translated = translate_team_name(home)
+    away_translated = translate_team_name(away)
+
     home_score = _to_int_or_none(raw.get("home_score"))
     away_score = _to_int_or_none(raw.get("away_score"))
 
     return Game(
         fixture_id=int(raw["id"]),
-        home_team=home,
-        away_team=away,
+        home_team=home_translated,    
+        away_team=away_translated,    
         group_name=raw.get("group"),
         match_type=raw.get("type", "group"),
-        start_time=parse_api_datetime(raw["local_date"]),
+        start_time=parse_api_datetime(raw["local_date"], raw.get("stadium_id", "1")),
         finished=str(raw.get("finished", "")).upper() == "TRUE",
         time_elapsed=str(raw.get("time_elapsed", "")),
         home_score=home_score,
