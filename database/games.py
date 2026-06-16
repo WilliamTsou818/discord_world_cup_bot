@@ -1,8 +1,10 @@
+# database/games.py
 from dataclasses import dataclass
 from datetime import timedelta
 
-from api_client import Game
-from database.base import TABLE_MATCHES, get_connection, utc_now
+from services import Game
+from database.base import TABLE_MATCHES, get_connection
+from utils import utc_now
 
 
 @dataclass
@@ -107,6 +109,22 @@ def get_matches_ready_for_settlement(hours_after_start: float = 2.5) -> list[Mat
                 ORDER BY start_time
                 """,
                 (cutoff,),
+            )
+            rows = cur.fetchall()
+    return [_row_to_match(row) for row in rows]
+
+
+def get_active_matches() -> list[MatchRow]:
+    """取得資料庫中所有『尚未結算』的賽事紀錄 (用於機器人啟動時加載按鈕監聽)"""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT fixture_id, home_team, away_team, group_name, match_type,
+                       start_time, is_posted, is_settled, home_score, away_score
+                FROM {TABLE_MATCHES}
+                WHERE is_settled = FALSE
+                """
             )
             rows = cur.fetchall()
     return [_row_to_match(row) for row in rows]

@@ -1,7 +1,9 @@
+# database/predictions.py
 from dataclasses import dataclass
 
-from database.base import TABLE_PREDICTIONS, get_connection, utc_now
+from database.base import TABLE_PREDICTIONS, get_connection
 from database.games import get_match
+from utils import utc_now
 
 LOCKED_MESSAGE = "❌ 比賽已開始，無法再提交或修改預測！"
 
@@ -54,6 +56,10 @@ def upsert_prediction(
     if is_match_locked(fixture_id):
         return False, LOCKED_MESSAGE
 
+    match = get_match(fixture_id)
+    if not match:
+        return False, "❌ 找不到賽事資訊。"
+
     existing = get_prediction(user_id, fixture_id)
     winner = predict_winner if predict_winner is not None else (existing.predict_winner if existing else "HOME")
     home_score = predict_home_score if predict_home_score is not None else (existing.predict_home_score if existing else 0)
@@ -78,7 +84,19 @@ def upsert_prediction(
                 (user_id, username, fixture_id, winner, home_score, away_score),
             )
 
-    return True, "✅ 預測已儲存！"
+    # 組合繁體中文最新預測結果確認報告
+    winner_display = "和局"
+    if winner == "HOME":
+        winner_display = f"{match.home_team} 勝"
+    elif winner == "AWAY":
+        winner_display = f"{match.away_team} 勝"
+
+    success_msg = (
+        f"✅ **預測儲存成功！**\n"
+        f"您目前的預測：**{match.home_team} {home_score} - {away_score} {match.away_team}** ({winner_display})\n"
+        f"*(開賽前您隨時可以再次點擊按鈕修改預測)*"
+    )
+    return True, success_msg
 
 
 def get_predictions_for_fixture(fixture_id: int) -> list[PredictionRow]:
