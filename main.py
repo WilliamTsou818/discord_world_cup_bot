@@ -137,9 +137,18 @@ async def settle_predictions(interaction: discord.Interaction):
             await interaction.followup.send("❌ 找不到目標頻道，請檢查 CHANNEL_ID 設定。", ephemeral=True)
             return
 
+        try:
+            all_games = api_client.fetch_games()
+            games_lookup = {game.fixture_id: game for game in all_games}
+        except Exception as exc:
+            logger.exception("Failed to fetch games from API during settlement")
+            await interaction.followup.send(f"❌ 結算失敗，無法取得 API 賽事資料：{exc}", ephemeral=True)
+            return
+        
         settled_count = 0
         for match in pending:
-            game = api_client.get_game_by_id(match.fixture_id)
+            game = games_lookup.get(match.fixture_id)
+            
             if game is None or not api_client.is_game_finished(game):
                 continue
             if game.home_score is None or game.away_score is None:
