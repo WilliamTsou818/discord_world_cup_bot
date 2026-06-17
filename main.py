@@ -54,6 +54,10 @@ def health_check():
         "test_mode": TEST_MODE,
     }
 
+@app.head("/")
+def health_check_head():
+    return Response(status_code=200)
+
 
 def run_fastapi():
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
