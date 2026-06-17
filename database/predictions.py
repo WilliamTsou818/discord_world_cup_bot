@@ -1,7 +1,7 @@
 # database/predictions.py
 from dataclasses import dataclass
 
-from database.base import TABLE_PREDICTIONS, get_connection
+from database.base import TABLE_PREDICTIONS, TABLE_MATCHES, get_connection
 from database.games import get_match
 from utils import utc_now
 
@@ -125,3 +125,44 @@ def _row_to_prediction(row) -> PredictionRow:
         predict_home_score=row[5],
         predict_away_score=row[6],
     )
+
+def get_user_prediction_history(user_id: str) -> list[dict]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT 
+                    m.home_team, 
+                    m.away_team, 
+                    m.fixture_id,
+                    m.home_score, 
+                    m.away_score, 
+                    m.is_settled,
+                    p.predict_winner, 
+                    p.predict_home_score, 
+                    p.predict_away_score,
+                    m.start_time
+                FROM {TABLE_PREDICTIONS} p
+                JOIN {TABLE_MATCHES} m ON p.fixture_id = m.fixture_id
+                WHERE p.user_id = %s
+                ORDER BY m.start_time DESC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+            
+    history = []
+    for r in rows:
+        history.append({
+            "home_team": r[0],
+            "away_team": r[1],
+            "fixture_id": r[2],
+            "actual_home": r[3],
+            "actual_away": r[4],
+            "is_settled": r[5],
+            "predict_winner": r[6],
+            "predict_home": r[7],
+            "predict_away": r[8],
+            "start_time": r[9],
+        })
+    return history

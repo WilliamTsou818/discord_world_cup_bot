@@ -160,3 +160,20 @@ def _row_to_match(row) -> MatchRow:
         home_score=row[8],
         away_score=row[9],
     )
+
+def get_predictable_matches() -> list[MatchRow]:
+    now = utc_now()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT fixture_id, home_team, away_team, group_name, match_type,
+                       start_time, is_posted, is_settled, home_score, away_score
+                FROM {TABLE_MATCHES}
+                WHERE start_time > %s
+                ORDER BY start_time ASC
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+    return [_row_to_match(row) for row in rows]
