@@ -177,3 +177,15 @@ def get_predictable_matches() -> list[MatchRow]:
             )
             rows = cur.fetchall()
     return [_row_to_match(row) for row in rows]
+
+def update_match_teams(fixture_id: int, home_team: str, away_team: str) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE {TABLE_MATCHES}
+                SET home_team = %s, away_team = %s
+                WHERE fixture_id = %s
+                """.format(TABLE_MATCHES=TABLE_MATCHES),
+                (home_team, away_team, fixture_id),
+            )
