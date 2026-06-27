@@ -136,38 +136,48 @@ async def settle_predictions(interaction: discord.Interaction):
             await interaction.followup.send("❌ 找不到目標頻道，請檢查 CHANNEL_ID 設定。", ephemeral=True)
             return
 
+        api_is_active = True
+        games_lookup = {}
         try:
             all_games = api_client.fetch_games()
             games_lookup = {game.fixture_id: game for game in all_games}
         except Exception as exc:
-            logger.exception("Failed to fetch games from API during settlement")
-            await interaction.followup.send(f"❌ 結算失敗，無法取得 API 賽事資料：{exc}", ephemeral=True)
-            return
-        
+            logger.warning("API offline. Switching to DB fallback: %s", exc)
+            api_is_active = False
+
         settled_count = 0
         for match in pending:
-            game = games_lookup.get(match.fixture_id)
-            
-            if game is None or not api_client.is_game_finished(game):
-                continue
-            if game.home_score is None or game.away_score is None:
-                continue
+            home_score = None
+            away_score = None
+
+            if api_is_active:
+                game = games_lookup.get(match.fixture_id)
+                if game is None or not api_client.is_game_finished(game):
+                    continue
+                home_score = game.home_score
+                away_score = game.away_score
+            else:
+                db_match = games_db.get_match(match.fixture_id)
+                if db_match is None or db_match.home_score is None or db_match.away_score is None:
+                    continue
+                home_score = db_match.home_score
+                away_score = db_match.away_score
 
             actual_winner = api_client.determine_winner(
-                game.home_score, game.away_score, match.match_type
+                home_score, away_score, match.match_type
             )
             predictions = predictions_db.get_predictions_for_fixture(match.fixture_id)
             scorers: list[str] = []
 
             for pred in predictions:
-                points = _calculate_points(pred, actual_winner, game.home_score, game.away_score)
+                points = _calculate_points(pred, actual_winner, home_score, away_score)
                 if points > 0:
                     leaderboard_db.add_points(pred.user_id, pred.username, points)
                     reason = "比分全對" if points == 3 else "勝負正確"
                     scorers.append(f"• {pred.username} +{points} 分（{reason}）")
 
-            games_db.update_match_result(match.fixture_id, game.home_score, game.away_score)
-            embed = _build_settlement_embed(match, game.home_score, game.away_score, scorers)
+            games_db.update_match_result(match.fixture_id, home_score, away_score)
+            embed = _build_settlement_embed(match, home_score, away_score, scorers)
             await channel.send(embed=embed)
             settled_count += 1
 
@@ -242,6 +252,31 @@ async def admin_set_teams(interaction: discord.Interaction, fixture_id: int, hom
     except Exception as exc:
         logger.exception("admin_set_teams failed")
         await interaction.followup.send(f"❌ 更新失敗：{exc}", ephemeral=True)
+
+@bot.tree.command(name="admin_set_score", description="手動錄入特定賽事比分，供結算使用")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(fixture_id="賽事 ID", home_score="主隊實際得分", away_score="客隊實際得分")
+async def admin_set_score(interaction: discord.Interaction, fixture_id: int, home_score: int, away_score: int):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        match = games_db.get_match(fixture_id)
+        if not match:
+            await interaction.followup.send(f"❌ 找不到賽事 ID {fixture_id} 的資料。", ephemeral=True)
+            return
+
+        with games_db.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE {TABLE_MATCHES} SET home_score = %s, away_score = %s WHERE fixture_id = %s".format(TABLE_MATCHES=games_db.TABLE_MATCHES),
+                    (home_score, away_score, fixture_id),
+                )
+        await interaction.followup.send(
+            f"✅ 成功手動錄入賽事 ID {fixture_id} 的實際比分為 {home_score} - {away_score}！請接續執行 /settle_predictions 指令發放積分。",
+            ephemeral=True,
+        )
+    except Exception as exc:
+        logger.exception("admin_set_score failed")
+        await interaction.followup.send(f"❌ 錄入失敗：{exc}", ephemeral=True)
 
 def main():
     server_thread = threading.Thread(target=run_fastapi, daemon=True)
