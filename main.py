@@ -207,6 +207,42 @@ async def leaderboard(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ 查詢失敗：{exc}", ephemeral=True)
 
 
+@bot.tree.command(name="admin_init_all_matches", description="初始化世足全部 104 場賽事")
+@app_commands.default_permissions(administrator=True)
+async def admin_init_all_matches(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        all_games = api_client.fetch_games()
+        inserted = games_db.sync_upcoming_games(all_games)
+        await interaction.followup.send(
+            f"✅ 初始化完成！共成功建立 {inserted} 場全新賽事，已建立的賽事未受影響。",
+            ephemeral=True,
+        )
+    except Exception as exc:
+        logger.exception("admin_init_all_matches failed")
+        await interaction.followup.send(f"❌ 初始化失敗：{exc}", ephemeral=True)
+
+
+@bot.tree.command(name="admin_set_teams", description="手動將淘汰賽 TBD 佔位符改為真實對陣國家")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(fixture_id="賽事 ID", home_team="主隊國家名稱", away_team="客隊國家名稱")
+async def admin_set_teams(interaction: discord.Interaction, fixture_id: int, home_team: str, away_team: str):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        match = games_db.get_match(fixture_id)
+        if not match:
+            await interaction.followup.send(f"❌ 找不到賽事 ID {fixture_id} 的資料。", ephemeral=True)
+            return
+
+        games_db.update_match_teams(fixture_id, home_team, away_team)
+        await interaction.followup.send(
+            f"✅ 成功將賽事 ID {fixture_id} 的對陣更新為：**{home_team} vs {away_team}**！",
+            ephemeral=True,
+        )
+    except Exception as exc:
+        logger.exception("admin_set_teams failed")
+        await interaction.followup.send(f"❌ 更新失敗：{exc}", ephemeral=True)
+
 def main():
     server_thread = threading.Thread(target=run_fastapi, daemon=True)
     server_thread.start()
