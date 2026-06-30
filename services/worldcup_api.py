@@ -101,9 +101,7 @@ def determine_winner(home_score: int, away_score: int, match_type: str) -> str:
         return "HOME"
     if away_score > home_score:
         return "AWAY"
-    if match_type == "group":
-        return "DRAW"
-    raise ValueError("Knockout match ended in a draw without a winner")
+    return "DRAW"
 
 
 def _to_int_or_none(value) -> int | None:
